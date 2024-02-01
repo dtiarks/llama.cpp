@@ -653,6 +653,9 @@ libllava.a: examples/llava/llava.cpp examples/llava/llava.h examples/llava/clip.
 llava-cli: examples/llava/llava-cli.cpp examples/llava/clip.h examples/llava/clip.cpp examples/llava/llava.h examples/llava/llava.cpp ggml.o llama.o $(COMMON_DEPS) $(OBJS)
 	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LDFLAGS) -Wno-cast-qual
 
+cog-vlm: examples/cog-vlm/cog-vlm-cli.cpp examples/cog-vlm/eva-clip.h examples/cog-vlm/eva-clip.cpp examples/cog-vlm/cog-vlm.h examples/cog-vlm/cog-vlm.cpp ggml.o llama.o $(COMMON_DEPS) $(OBJS)
+	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LDFLAGS) -Wno-cast-qual
+
 baby-llama: examples/baby-llama/baby-llama.cpp ggml.o llama.o $(COMMON_DEPS) train.o $(OBJS)
 	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LDFLAGS)
 
