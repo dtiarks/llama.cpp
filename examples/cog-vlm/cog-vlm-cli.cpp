@@ -180,6 +180,7 @@ int main(int argc, char ** argv) {
     if (!image_embed) {
         return 1;
     }
+    image_embed = nullptr;
 
     // process the prompt
     process_prompt(ctx_llava, image_embed, &params, params.prompt);

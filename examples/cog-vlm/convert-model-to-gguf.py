@@ -27,10 +27,10 @@ language_tensor_name_mapping_layers = (
     ("model.norm.weight", "output_norm.weight", False, None),
     ("lm_head.weight", "output.weight", False, None),
     ("model.layers.{}.input_layernorm.weight", "blk.{}.attn_norm.weight", False, None),
-    ("model.layers.0.self_attn.language_expert_query_key_value.weight", "blk.{}.attn_{}.0.weight", True,
+    ("model.layers.{}.self_attn.language_expert_query_key_value.weight", "blk.{}.attn_{}.0.weight", True,
      ["q", "k", "v"]),
     ("model.layers.{}.self_attn.language_expert_dense.weight", "blk.{}.attn_output.0.weight", False, None),
-    ("model.layers.0.self_attn.vision_expert_query_key_value.weight", "blk.{}.attn_{}.1.weight", True,
+    ("model.layers.{}.self_attn.vision_expert_query_key_value.weight", "blk.{}.attn_{}.1.weight", True,
      ["q", "k", "v"]),
     ("model.layers.{}.self_attn.vision_expert_dense.weight", "blk.{}.attn_output.1.weight", False, None),
     ("model.layers.{}.mlp.language_mlp.down_proj.weight", "blk.{}.ffn_down.0.weight", False, None),
@@ -219,7 +219,7 @@ if __name__ == "__main__":
         low_cpu_mem_usage=True
     ).to('cpu')
 
-    fname_middle = "eva_clip_"
+    fname_middle = "cogvlm_"
     has_text_encoder = False
     has_vision_encoder = True
     has_llava_projector = True
