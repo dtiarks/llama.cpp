@@ -474,10 +474,12 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
                                      embeddings_tokens->nb[1], embeddings_tokens->nb[2], embeddings_tokens->nb[3], model.boi_token->nb[1]);
         embeddings_tokens = ggml_acc(ctx0, embeddings_tokens, model.eoi_token,
                                      embeddings_tokens->nb[1], embeddings_tokens->nb[2], embeddings_tokens->nb[3], (num_patches + 1) * model.eoi_token->nb[1]);
+
+        embeddings = embeddings_tokens;
     }
 
     // build the graph
-    ggml_build_forward_expand(gf, embeddings_tokens);
+    ggml_build_forward_expand(gf, embeddings);
 
     ggml_free(ctx0);
 
@@ -951,6 +953,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
     // copy the embeddings to the location passed by the user
     int n_embedding = ggml_nbytes(embeddings);
     ggml_backend_tensor_get(embeddings, vec, 0, n_embedding);
+    float deb[5] = {vec[0], vec[1], vec[2], vec[3], vec[4]};
     return true;
 }
 
@@ -961,7 +964,7 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
 int clip_n_patches(const struct clip_ctx * ctx) {
     auto & params = ctx->vision_model.hparams;
 
-    return (params.image_size / params.patch_size) * (params.image_size / params.patch_size);
+    return (params.image_size / params.patch_size) * (params.image_size / params.patch_size) + 2;
 }
 
 size_t clip_embd_nbytes(const struct clip_ctx * ctx) {

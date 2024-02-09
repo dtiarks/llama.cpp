@@ -4,13 +4,13 @@
 #include "cog-vlm.h"
 #include "llama.h"
 
-// #include "base64.hpp"
-
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 
-/*static bool eval_tokens(struct llama_context * ctx_llama, std::vector<llama_token> tokens, int n_batch, int * n_past) {
+static bool eval_tokens(struct llama_context * ctx_llama, std::vector<llama_token> tokens, int n_batch, int * n_past) {
+    llama_set_current_expert(ctx_llama, 0);
+
     int N = (int) tokens.size();
     for (int i = 0; i < N; i += n_batch) {
         int n_eval = (int) tokens.size() - i;
@@ -52,58 +52,7 @@ static const char * sample(struct llama_sampling_context * ctx_sampling,
     }
     eval_id(ctx_llama, id, n_past);
     return ret.c_str();
-}*/
-
-//static const char* IMG_BASE64_TAG_BEGIN = "<img src=\"data:image/jpeg;base64,";
-//static const char* IMG_BASE64_TAG_END = "\">";
-
-/*static void find_image_tag_in_prompt(const std::string& prompt, size_t& begin_out, size_t& end_out) {
-    begin_out = prompt.find(IMG_BASE64_TAG_BEGIN);
-    end_out = prompt.find(IMG_BASE64_TAG_END, (begin_out == std::string::npos) ? 0UL : begin_out);
 }
-
-static bool prompt_contains_image(const std::string& prompt) {
-    size_t begin, end;
-    find_image_tag_in_prompt(prompt, begin, end);
-    return (begin != std::string::npos);
-}
-
-// replaces the base64 image tag in the prompt with `replacement`
-static llava_image_embed * llava_image_embed_make_with_prompt_base64(struct clip_ctx * ctx_clip, int n_threads, const std::string& prompt) {
-    size_t img_base64_str_start, img_base64_str_end;
-    find_image_tag_in_prompt(prompt, img_base64_str_start, img_base64_str_end);
-    if (img_base64_str_start == std::string::npos || img_base64_str_end == std::string::npos) {
-        fprintf(stderr, "%s: invalid base64 image tag. must be %s<base64 byte string>%s\n", __func__, IMG_BASE64_TAG_BEGIN, IMG_BASE64_TAG_END);
-        return NULL;
-    }
-
-    auto base64_bytes_start = img_base64_str_start + strlen(IMG_BASE64_TAG_BEGIN);
-    auto base64_bytes_count = img_base64_str_end - base64_bytes_start;
-    auto base64_str = prompt.substr(base64_bytes_start, base64_bytes_count );
-
-    auto required_bytes = base64::required_encode_size(base64_str.size());
-    auto img_bytes = std::vector<unsigned char>(required_bytes);
-    base64::decode(base64_str.begin(), base64_str.end(), img_bytes.begin());
-
-    auto embed = llava_image_embed_make_with_bytes(ctx_clip, n_threads, img_bytes.data(), img_bytes.size());
-    if (!embed) {
-        fprintf(stderr, "%s: could not load image from base64 string.\n", __func__);
-        return NULL;
-    }
-
-    return embed;
-}
-
-static std::string remove_image_from_prompt(const std::string& prompt, const char * replacement = "") {
-    size_t begin, end;
-    find_image_tag_in_prompt(prompt, begin, end);
-    if (begin == std::string::npos || end == std::string::npos) {
-        return prompt;
-    }
-    auto pre = prompt.substr(0, begin);
-    auto post = prompt.substr(end + strlen(IMG_BASE64_TAG_END));
-    return pre + replacement + post;
-}*/
 
 struct cog_vlm_context {
     struct clip_ctx * ctx_clip = NULL;
@@ -129,16 +78,19 @@ static struct llava_image_embed * load_image(cog_vlm_context * ctx_llava, gpt_pa
     return embed;
 }
 
-/*static void process_prompt(struct cog_vlm_context * ctx_llava, struct llava_image_embed * image_embed, gpt_params * params, const std::string & prompt) {
+static void process_prompt(struct cog_vlm_context * ctx_llava, struct llava_image_embed * image_embed, gpt_params * params, const std::string & prompt) {
     int n_past = 0;
 
     const int max_tgt_len = params->n_predict < 0 ? 256 : params->n_predict;
     const bool add_bos = llama_should_add_bos_token(llama_get_model(ctx_llava->ctx_llama));
 
-    // llava chat format is "<system_prompt>\nUSER:<image_embeddings>\n<textual_prompt>\nASSISTANT:"
-    eval_string(ctx_llava->ctx_llama, "A chat between a curious human and an artificial intelligence assistant.  The assistant gives helpful, detailed, and polite answers to the human's questions.\nUSER:", params->n_batch, &n_past, add_bos);
-    llava_eval_image_embed(ctx_llava->ctx_llama, image_embed, params->n_batch, &n_past);
-    eval_string(ctx_llava->ctx_llama, (prompt + "\nASSISTANT:").c_str(), params->n_batch, &n_past, false);
+    eval_string(ctx_llava->ctx_llama, "", params->n_batch, &n_past, add_bos);
+
+    if (image_embed != nullptr) {
+        llava_eval_image_embed(ctx_llava->ctx_llama, image_embed, params->n_batch, &n_past);
+    }
+
+    eval_string(ctx_llava->ctx_llama, prompt .c_str(), params->n_batch, &n_past, false);
 
     // generate the response
 
@@ -156,7 +108,7 @@ static struct llava_image_embed * load_image(cog_vlm_context * ctx_llava, gpt_pa
 
     llama_sampling_free(ctx_sampling);
     printf("\n");
-}*/
+}
 
 
 static struct cog_vlm_context * cog_vlm_init(gpt_params * params) {
@@ -164,39 +116,37 @@ static struct cog_vlm_context * cog_vlm_init(gpt_params * params) {
 
     auto prompt = params->prompt;
     if (prompt.empty()) {
-        prompt = "describe the image in detail.";
+        prompt = "die";
     }
 
     auto ctx_clip = clip_model_load(clip_path, /*verbosity=*/ 1);
 
-/*    llama_backend_init(params->numa);
+    llama_backend_init(params->numa);
 
     llama_model_params model_params = llama_model_params_from_gpt_params(*params);
 
-    llama_model * model = llama_load_model_from_file(params->model.c_str(), model_params);
+    llama_model * model = llama_load_model_from_file(clip_path, model_params);
     if (model == NULL) {
         fprintf(stderr , "%s: error: unable to load model\n" , __func__);
         return NULL;
     }
 
+
     llama_context_params ctx_params = llama_context_params_from_gpt_params(*params);
     ctx_params.n_ctx           = params->n_ctx < 2048 ? 2048 : params->n_ctx; // we need a longer context size to process image embeddings
 
     llama_context * ctx_llama = llama_new_context_with_model(model, ctx_params);
-
     if (ctx_llama == NULL) {
-        fprintf(stderr , "%s: error: failed to create the llama_context\n" , __func__);
+        fprintf(stderr, "%s: error: failed to create the llama_context\n", __func__);
         return NULL;
-    }*/
+    }
 
-    auto ctx_llava = (struct cog_vlm_context *)malloc(sizeof(cog_vlm_context));
+    auto ctx_cvlm = (struct cog_vlm_context *)malloc(sizeof(cog_vlm_context));
 
-    ctx_llava->ctx_clip = ctx_clip;
-    /*
-    ctx_llava->ctx_llama = ctx_llama;
-
-    ctx_llava->model = model;*/
-    return ctx_llava;
+    ctx_cvlm->ctx_clip = ctx_clip;
+    ctx_cvlm->ctx_llama = ctx_llama;
+    ctx_cvlm->model = model;
+    return ctx_cvlm;
 }
 
 static void llava_free(struct cog_vlm_context * ctx_llava) {
@@ -219,15 +169,10 @@ int main(int argc, char ** argv) {
         show_additional_info(argc, argv);
         return 1;
     }
-/*    if (params.mmproj.empty() || (params.image.empty() && !prompt_contains_image(params.prompt))) {
-        gpt_print_usage(argc, argv, params);
-        show_additional_info(argc, argv);
-        return 1;
-    }*/
 
     auto ctx_llava = cog_vlm_init(&params);
     if (ctx_llava == NULL) {
-        fprintf(stderr, "%s: error: failed to init llava\n", __func__);
+        fprintf(stderr, "%s: error: failed to init cogvlm\n", __func__);
         return 1;
     }
 
@@ -235,22 +180,14 @@ int main(int argc, char ** argv) {
     if (!image_embed) {
         return 1;
     }
-//
-//    // process the prompt
-//    /*
-//    process_prompt(ctx_llava, image_embed, &params, params.prompt);
-//
-//    llama_print_timings(ctx_llava->ctx_llama);
-//     */
-//
-//    llava_image_embed_free(image_embed);
-//    llava_free(ctx_llava);
-    int start = 1226*4096-1;
-    start = 1*4096-1;
-    float data[5] = {-6.72121048e-02,  3.16887450e+00,  7.86830842e-01,  2.08255291e+00,   -6.88669920e-01};
-    for (int i = start; i < start+100; i++) {
-        float e = image_embed->embed[i];
-        int n = 1;
-    }
+
+    // process the prompt
+    process_prompt(ctx_llava, image_embed, &params, params.prompt);
+
+    llama_print_timings(ctx_llava->ctx_llama);
+
+    llava_image_embed_free(image_embed);
+    llava_free(ctx_llava);
+
     return 0;
 }

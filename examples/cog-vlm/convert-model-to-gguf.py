@@ -1,14 +1,46 @@
 import argparse
 import os
 import json
+import gguf
+from pathlib import Path
 
 import torch
 import numpy as np
 from gguf import *
-from transformers import AutoModelForCausalLM, AutoConfig
+from transformers import AutoModelForCausalLM, AutoConfig, AutoTokenizer, LlamaTokenizer
 
 TEXT = "clip.text"
 VISION = "clip.vision"
+
+
+class SentencePieceTokenTypes(IntEnum):
+    NORMAL = 1
+    UNKNOWN = 2
+    CONTROL = 3
+    USER_DEFINED = 4
+    UNUSED = 5
+    BYTE = 6
+
+language_tensor_name_mapping_layers = (
+    # DFF model
+    ("model.embed_tokens.weight", "token_embd.weight", False, None),
+    ("model.norm.weight", "output_norm.weight", False, None),
+    ("lm_head.weight", "output.weight", False, None),
+    ("model.layers.{}.input_layernorm.weight", "blk.{}.attn_norm.weight", False, None),
+    ("model.layers.0.self_attn.language_expert_query_key_value.weight", "blk.{}.attn_{}.0.weight", True,
+     ["q", "k", "v"]),
+    ("model.layers.{}.self_attn.language_expert_dense.weight", "blk.{}.attn_output.0.weight", False, None),
+    ("model.layers.0.self_attn.vision_expert_query_key_value.weight", "blk.{}.attn_{}.1.weight", True,
+     ["q", "k", "v"]),
+    ("model.layers.{}.self_attn.vision_expert_dense.weight", "blk.{}.attn_output.1.weight", False, None),
+    ("model.layers.{}.mlp.language_mlp.down_proj.weight", "blk.{}.ffn_down.0.weight", False, None),
+    ("model.layers.{}.mlp.language_mlp.gate_proj.weight", "blk.{}.ffn_gate.0.weight", False, None),
+    ("model.layers.{}.mlp.language_mlp.up_proj.weight", "blk.{}.ffn_up.0.weight", False, None),
+    ("model.layers.{}.mlp.vision_mlp.down_proj.weight", "blk.{}.ffn_down.1.weight", False, None),
+    ("model.layers.{}.mlp.vision_mlp.gate_proj.weight", "blk.{}.ffn_gate.1.weight", False, None),
+    ("model.layers.{}.mlp.vision_mlp.up_proj.weight", "blk.{}.ffn_up.1.weight", False, None),
+    ("model.layers.{}.post_attention_layernorm.weight", "blk.{}.ffn_norm.weight", False, None),
+)
 
 vision_tensor_name_mapping_layers = (
     ("model.vision.transformer.layers.{}.attention.dense.bias", "v.blk.{}.attn_out.bias", False, None),
@@ -30,10 +62,12 @@ vision_tensor_name_mapping_layers = (
     ("model.vision.linear_proj.dense_4h_to_h.weight", "v.dense_4h_to_h.weight", False, None),
     ("model.vision.linear_proj.gate_proj.weight", "v.gate_proj.weight", False, None),
     ("model.vision.linear_proj.norm1.weight", "v.norm1.weight", False, None),
-    ("model.vision.linear_proj.norm1.bias", "v.norm1.bias", False, None)
+    ("model.vision.linear_proj.norm1.bias", "v.norm1.bias", False, None),
+
 )
 
-extra_mapping_args = {}
+vision_extra_mapping_args = {}
+language_extra_mapping_args = {}
 
 tensor_name_mapping = {
     "model.vision.patch_embedding.proj.weight": "v.patch_embd.weight",
@@ -103,25 +137,62 @@ def parse():
     return args
 
 
+def _set_vocab_sentencepiece(dir_model, config, gguf_writer):
+    from sentencepiece import SentencePieceProcessor
+
+    tokens: list[bytes] = []
+    scores: list[float] = []
+    toktypes: list[int] = []
+
+    tokenizer_path = dir_model / 'tokenizer.model'
+
+    if not tokenizer_path.is_file():
+        print(f'Error: Missing {tokenizer_path}', file=sys.stderr)
+        sys.exit(1)
+
+    tokenizer = SentencePieceProcessor(str(tokenizer_path))
+    vocab_size = config.get('vocab_size', tokenizer.vocab_size())
+
+    for token_id in range(vocab_size):
+        piece = tokenizer.id_to_piece(token_id)
+        text = piece.encode("utf-8")
+        score = tokenizer.get_score(token_id)
+
+        toktype = SentencePieceTokenTypes.NORMAL
+        if tokenizer.is_unknown(token_id):
+            toktype = SentencePieceTokenTypes.UNKNOWN
+        elif tokenizer.is_control(token_id):
+            toktype = SentencePieceTokenTypes.CONTROL
+        elif tokenizer.is_unused(token_id):
+            toktype = SentencePieceTokenTypes.UNUSED
+        elif tokenizer.is_byte(token_id):
+            toktype = SentencePieceTokenTypes.BYTE
+
+        tokens.append(text)
+        scores.append(score)
+        toktypes.append(toktype)
+
+    added_tokens_file = dir_model / 'added_tokens.json'
+    if added_tokens_file.is_file():
+        with open(added_tokens_file, "r", encoding="utf-8") as f:
+            added_tokens_json = json.load(f)
+
+            for key in added_tokens_json:
+                tokens.append(key.encode("utf-8"))
+                scores.append(-1000.0)
+                toktypes.append(SentencePieceTokenTypes.USER_DEFINED)
+
+    gguf_writer.add_tokenizer_model("llama")
+    gguf_writer.add_token_list(tokens)
+    gguf_writer.add_token_scores(scores)
+    gguf_writer.add_token_types(toktypes)
+
+
 if __name__ == "__main__":
     args = parse()
-    # if args.text_only and args.vision_only:
-    #     print("--text-only and --image-only arguments cannot be specified at the same time.")
-    #     exit(1)
-    #
-    # if args.use_f32:
-    #     print("WARNING: Weights for the convolution op is always saved in f16, as the convolution op in GGML does not support 32-bit kernel weights yet.")
 
     # output in the same directory as the model if output_dir is None
     dir_model = args.model_dir
-
-    # if args.clip_model_is_vision:
-    #     vocab = None
-    #     tokens = None
-    # else:
-    #     with open(dir_model + "/vocab.json", "r", encoding="utf-8") as f:
-    #         vocab = json.load(f)
-    #         tokens = [key for key in vocab]
 
     with open(dir_model + "/config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -138,25 +209,15 @@ if __name__ == "__main__":
     # if args.use_f32:
     #    ftype = 0
 
+    tokenizer = LlamaTokenizer.from_pretrained('lmsys/vicuna-7b-v1.5')
+    tokenizer_path = Path(tokenizer.vocab_file).parent
+
     model = AutoModelForCausalLM.from_pretrained(
         dir_model,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
         low_cpu_mem_usage=True
     ).to('cpu')
-
-    ## Used to store tiny model
-    # config = AutoConfig.from_pretrained(dir_model,
-    #                                     torch_dtype=torch.bfloat16,
-    #                                     trust_remote_code=True,
-    #                                     low_cpu_mem_usage=True)
-    # model = AutoModelForCausalLM.from_config(
-    #     config, torch_dtype=torch.bfloat16,
-    #     trust_remote_code=True
-    # ).to('cpu')
-    # model.save_pretrained(dir_model)
-    #
-    # exit(0)
 
     fname_middle = "eva_clip_"
     has_text_encoder = False
@@ -167,7 +228,7 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
     output_prefix = os.path.basename(output_dir).replace("ggml_", "")
     fname_out = os.path.join(output_dir, f"{fname_middle}model-{ftype_str[ftype]}.gguf")
-    fout = GGUFWriter(path=fname_out, arch="eva-clip")
+    fout = GGUFWriter(path=fname_out, arch="deepfeaturefusion")
 
     fout.add_bool("clip.has_text_encoder", has_text_encoder)
     fout.add_bool("clip.has_vision_encoder", has_vision_encoder)
@@ -176,6 +237,17 @@ if __name__ == "__main__":
     model_name = config["_name_or_path"] if "_name_or_path" in config else os.path.basename(dir_model)
     fout.add_name(model_name)
     fout.add_description("CogVLM model")
+
+    # deep feature fusion hparams
+    fout.add_uint32("deepfeaturefusion.expert_count", 2)
+    fout.add_uint32("deepfeaturefusion.expert_used_count", 2)
+    fout.add_uint32("deepfeaturefusion.context_length", config["max_position_embeddings"])
+    fout.add_uint32("deepfeaturefusion.embedding_length", config["hidden_size"])
+    fout.add_uint32("deepfeaturefusion.feed_forward_length", config["intermediate_size"])
+    fout.add_uint32("deepfeaturefusion.attention.head_count", config["num_attention_heads"])
+    fout.add_uint32("deepfeaturefusion.block_count", config["num_hidden_layers"])
+    fout.add_float32("deepfeaturefusion.attention.layer_norm_rms_epsilon", config["rms_norm_eps"])
+    _set_vocab_sentencepiece(tokenizer_path, config, fout)
 
     # vision_model hparams
     fout.add_uint32("clip.vision.image_size", v_hparams["image_size"])
@@ -207,35 +279,52 @@ if __name__ == "__main__":
             py_name = layer_spec[0].format(l)
             if layer_spec[2]:
                 llama_names = [layer_spec[1].format(l, a) for a in layer_spec[3]]
-                extra_mapping_args[py_name] = llama_names
+                vision_extra_mapping_args[py_name] = llama_names
                 continue
 
             llama_name = layer_spec[1].format(l)
             tensor_name_mapping[py_name] = llama_name
 
-    fp = open("./name_list.txt", "w+")
+        for layer_spec in language_tensor_name_mapping_layers:
+            py_name = layer_spec[0].format(l)
+            if layer_spec[2]:
+                llama_names = [layer_spec[1].format(l, a) for a in layer_spec[3]]
+                language_extra_mapping_args[py_name] = llama_names
+                continue
+
+            llama_name = layer_spec[1].format(l)
+            tensor_name_mapping[py_name] = llama_name
 
     state_dict = model.state_dict()
     for name, data in state_dict.items():
         mapped_name = tensor_name_mapping.get(name, None)
         if mapped_name is None:
-            extra_args = extra_mapping_args.get(name, None)
-            if extra_args:
+            vision_extra_args = vision_extra_mapping_args.get(name, None)
+            language_extra_args = language_extra_mapping_args.get(name, None)
+            if vision_extra_args:
                 if "weight" in name:
                     data = data.reshape(3, v_hparams["hidden_size"], v_hparams["hidden_size"]).float().squeeze().numpy()
                 elif "bias" in name:
                     data = data.reshape(3, v_hparams["hidden_size"]).float().squeeze().numpy()
                 # q, k, v = data[..., 0], data[..., 1], data[..., 2]
-                for idx, e in enumerate(extra_args):
-                    fp.write(e + "\n")
+                for idx, e in enumerate(vision_extra_args):
                     fout.add_tensor(e, data[idx, ...])
+                    print(f"tensor {e} is always saved in f16")
+                continue
+            elif language_extra_args:
+                if "weight" in name:
+                    data = data.reshape(3, config["hidden_size"], config["hidden_size"]).float().squeeze().numpy()
+                elif "bias" in name:
+                    data = data.reshape(3, config["hidden_size"]).float().squeeze().numpy()
+                for idx, e in enumerate(language_extra_args):
+                    fout.add_tensor(e, data[idx, ...])
+                    print(f"tensor {e} is always saved in f16")
                 continue
             else:
                 continue
 
         name = mapped_name
 
-        fp.write(name + "\n")
         data = data.float().squeeze().numpy()
 
         n_dims = len(data.shape)
