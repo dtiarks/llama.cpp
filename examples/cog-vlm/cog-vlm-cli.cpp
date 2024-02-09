@@ -86,9 +86,9 @@ static void process_prompt(struct cog_vlm_context * ctx_llava, struct llava_imag
 
     eval_string(ctx_llava->ctx_llama, "", params->n_batch, &n_past, add_bos);
 
-    if (image_embed != nullptr) {
-        llava_eval_image_embed(ctx_llava->ctx_llama, image_embed, params->n_batch, &n_past);
-    }
+    //if (image_embed != nullptr) {
+    //    llava_eval_image_embed(ctx_llava->ctx_llama, image_embed, params->n_batch, &n_past);
+    //}
 
     eval_string(ctx_llava->ctx_llama, prompt .c_str(), params->n_batch, &n_past, false);
 
@@ -182,9 +182,9 @@ int main(int argc, char ** argv) {
     }
 
     // process the prompt
-    //process_prompt(ctx_llava, image_embed, &params, params.prompt);
+    process_prompt(ctx_llava, image_embed, &params, params.prompt);
 
-    //llama_print_timings(ctx_llava->ctx_llama);
+    llama_print_timings(ctx_llava->ctx_llama);
 
     llava_image_embed_free(image_embed);
     llava_free(ctx_llava);
