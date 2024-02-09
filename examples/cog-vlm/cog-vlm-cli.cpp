@@ -125,7 +125,7 @@ static struct cog_vlm_context * cog_vlm_init(gpt_params * params) {
 
     llama_model_params model_params = llama_model_params_from_gpt_params(*params);
 
-    llama_model * model = llama_load_model_from_file(clip_path, model_params);
+    llama_model * model = llama_load_model_from_file(params->model.c_str(), model_params);
     if (model == NULL) {
         fprintf(stderr , "%s: error: unable to load model\n" , __func__);
         return NULL;
@@ -180,12 +180,11 @@ int main(int argc, char ** argv) {
     if (!image_embed) {
         return 1;
     }
-    image_embed = nullptr;
 
     // process the prompt
-    process_prompt(ctx_llava, image_embed, &params, params.prompt);
+    //process_prompt(ctx_llava, image_embed, &params, params.prompt);
 
-    llama_print_timings(ctx_llava->ctx_llama);
+    //llama_print_timings(ctx_llava->ctx_llama);
 
     llava_image_embed_free(image_embed);
     llava_free(ctx_llava);
