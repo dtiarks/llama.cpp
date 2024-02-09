@@ -132,23 +132,12 @@ if __name__ == "__main__":
     # if args.use_f32:
     #    ftype = 0
 
-    # model = AutoModelForCausalLM.from_pretrained(
-    #     dir_model,
-    #     torch_dtype=torch.bfloat16,
-    #     trust_remote_code=True,
-    #     low_cpu_mem_usage=True
-    # ).to('cpu')
-
-    config = AutoConfig.from_pretrained(dir_model,
-                                        torch_dtype=torch.bfloat16,
-                                        trust_remote_code=True,
-                                        low_cpu_mem_usage=True)
-    model = AutoModelForCausalLM.from_config(
-        config, torch_dtype=torch.bfloat16,
-        trust_remote_code=True
+    model = AutoModelForCausalLM.from_pretrained(
+        dir_model,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        low_cpu_mem_usage=True
     ).to('cpu')
-    model.save_pretrained(dir_model)
-    exit(0)
 
     fname_middle = "evaclip_"
     has_text_encoder = False
