@@ -274,7 +274,7 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
     };
 
     struct ggml_context * ctx0 = ggml_init(params);
-    struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, 2*2048, false);
+    struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, 2 * GGML_DEFAULT_GRAPH_SIZE, false);
 
     struct ggml_tensor * inp_raw = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, image_size, image_size, 3, batch_size);
     ggml_allocr_alloc(ctx->compute_alloc, inp_raw);
@@ -739,7 +739,7 @@ struct clip_ctx * clip_model_load(const char * fname, const int verbosity = 1) {
 
     // measure mem requirement and allocate
     {
-        new_clip->buf_compute_meta.resize(GGML_DEFAULT_GRAPH_SIZE * ggml_tensor_overhead() + ggml_graph_overhead() + 5*70000);
+        new_clip->buf_compute_meta.resize(2 * GGML_DEFAULT_GRAPH_SIZE * ggml_tensor_overhead() + ggml_graph_overhead());
         new_clip->compute_alloc = ggml_allocr_new_measure_from_backend(new_clip->backend);
         clip_image_f32_batch batch;
         batch.size = 1;

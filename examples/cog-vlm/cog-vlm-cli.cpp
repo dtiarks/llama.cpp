@@ -132,7 +132,7 @@ static struct cog_vlm_context * cog_vlm_init(gpt_params * params) {
         prompt = "";
     }
 
-    params->prompt = "Question: " + prompt + " Answer:";
+    params->prompt = "Question: " + prompt + " Answer: ";
 
     auto ctx_clip = clip_model_load(clip_path, /*verbosity=*/ 1);
 
