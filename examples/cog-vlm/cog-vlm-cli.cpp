@@ -13,7 +13,8 @@ static bool eval_tokens(struct llama_context * ctx_llama, std::vector<llama_toke
 
     int N = (int) tokens.size();
     for (int i = 0; i < N; i += n_batch) {
-        int n_eval = (int) tokens.size() - i;
+        //int n_eval = (int) tokens.size() - i;
+        int n_eval = i + 1;
         if (n_eval > n_batch) {
             n_eval = n_batch;
         }
@@ -29,13 +30,26 @@ static bool eval_tokens(struct llama_context * ctx_llama, std::vector<llama_toke
 static bool eval_id(struct llama_context * ctx_llama, int id, int * n_past) {
     std::vector<llama_token> tokens;
     tokens.push_back(id);
-    return eval_tokens(ctx_llama, tokens, 1, n_past);
+    return llama_eval(ctx_llama, tokens.data(), 1, *n_past);
 }
 
 static bool eval_string(struct llama_context * ctx_llama, const char* str, int n_batch, int * n_past, bool add_bos){
     std::string              str2     = str;
-    std::vector<llama_token> embd_inp = ::llama_tokenize(ctx_llama, str2, add_bos);
-    eval_tokens(ctx_llama, embd_inp, n_batch, n_past);
+    std::vector<llama_token> tokens_list = ::llama_tokenize(ctx_llama, str2, add_bos);
+
+    llama_batch batch = llama_batch_init(n_batch, 0, 1);
+
+    // evaluate the initial prompt
+    for (size_t i = 0; i < tokens_list.size(); i++) {
+        llama_batch_add(batch, tokens_list[i], i, { 0 }, false);
+    }
+
+    // llama_decode will output logits only for the last token of the prompt
+    batch.logits[batch.n_tokens - 1] = true;
+
+    if (llama_decode(ctx_llama, batch) != 0) {
+        return 1;
+    }
     return true;
 }
 
@@ -66,7 +80,6 @@ static void show_additional_info(int /*argc*/, char ** argv) {
 }
 
 static struct llava_image_embed * load_image(cog_vlm_context * ctx_llava, gpt_params * params) {
-
     // load and preprocess the image
     llava_image_embed * embed = NULL;
     embed = llava_image_embed_make_with_filename(ctx_llava->ctx_clip, params->n_threads, params->image.c_str());
@@ -86,11 +99,11 @@ static void process_prompt(struct cog_vlm_context * ctx_llava, struct llava_imag
 
     eval_string(ctx_llava->ctx_llama, "", params->n_batch, &n_past, add_bos);
 
-    //if (image_embed != nullptr) {
-    //    llava_eval_image_embed(ctx_llava->ctx_llama, image_embed, params->n_batch, &n_past);
-    //}
+    if (image_embed != nullptr) {
+        llava_eval_image_embed(ctx_llava->ctx_llama, image_embed, params->n_batch, &n_past);
+    }
 
-    eval_string(ctx_llava->ctx_llama, prompt .c_str(), params->n_batch, &n_past, false);
+    eval_string(ctx_llava->ctx_llama, prompt.c_str(), params->n_batch, &n_past, false);
 
     // generate the response
 
@@ -116,8 +129,10 @@ static struct cog_vlm_context * cog_vlm_init(gpt_params * params) {
 
     auto prompt = params->prompt;
     if (prompt.empty()) {
-        prompt = "die";
+        prompt = "";
     }
+
+    params->prompt = "Question: " + prompt + " Answer:";
 
     auto ctx_clip = clip_model_load(clip_path, /*verbosity=*/ 1);
 
@@ -130,7 +145,6 @@ static struct cog_vlm_context * cog_vlm_init(gpt_params * params) {
         fprintf(stderr , "%s: error: unable to load model\n" , __func__);
         return NULL;
     }
-
 
     llama_context_params ctx_params = llama_context_params_from_gpt_params(*params);
     ctx_params.n_ctx           = params->n_ctx < 2048 ? 2048 : params->n_ctx; // we need a longer context size to process image embeddings
